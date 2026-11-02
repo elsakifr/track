@@ -1,0 +1,36 @@
+name: Bug
+description: Something does not work as intended
+labels: ['type:bug']
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Device model + OS version for mobile; browser for web; local or staging backend.
+      placeholder: Pixel 8, Android 16, staging
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots
+      render: shell

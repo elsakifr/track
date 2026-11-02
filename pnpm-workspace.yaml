@@ -1,0 +1,15 @@
+packages:
+  - apps/*
+  - packages/*
+  - tools/*
+
+# The Supabase CLI downloads its binary in a postinstall script.
+onlyBuiltDependencies:
+  - supabase
+  - esbuild
+
+# Expo pins an exact React version per SDK. Force one copy across the monorepo so
+# web and mobile never load two Reacts (hoisted layout). Bump together with the Expo SDK.
+overrides:
+  react: 19.3.0
+  react-dom: 19.3.0

@@ -1,0 +1,2 @@
+-- Local development seed data. Runs after migrations on `pnpm db:reset`.
+-- M1 adds a demo race, course and participants here (no admin dashboard in the MVP).

@@ -1,0 +1,35 @@
+name: Feature
+description: A user-facing capability or technical building block
+labels: ['type:feature']
+body:
+  - type: textarea
+    id: story
+    attributes:
+      label: User story
+      description: Who needs this, what do they need, and why?
+      placeholder: As a spectator, I want to search for a runner by bib number so that I can follow them.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Concrete, testable conditions. The PR is done when all are met.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Technical notes
+      description: Approach, affected workspaces, open questions, links to docs or ADRs.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options: [mobile, web, backend, shared, infra, docs]
+    validations:
+      required: true
