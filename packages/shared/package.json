@@ -1,0 +1,21 @@
+{
+  "name": "@track/shared",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Domain types and validation schemas shared by every Track workspace, including the canonical position-event contract",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "@track/config": "workspace:*",
+    "eslint": "^10.14.0",
+    "typescript": "~6.0.3",
+    "vitest": "^5.0.5"
+  }
+}

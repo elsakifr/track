@@ -1,0 +1,29 @@
+{
+  "name": "@track/mobile",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Runner app: background GPS tracking with offline buffering",
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"@track/mobile: no tests yet (jest-expo is added with the first mobile logic in M1)\"",
+    "doctor": "npx expo-doctor@latest"
+  },
+  "dependencies": {
+    "@track/shared": "workspace:*",
+    "expo": "~58.0.22",
+    "expo-status-bar": "~58.0.4",
+    "react": "19.3.0",
+    "react-native": "0.88.1"
+  },
+  "devDependencies": {
+    "@track/config": "workspace:*",
+    "@types/react": "~19.3.0",
+    "eslint": "^10.14.0",
+    "typescript": "~6.0.3"
+  }
+}

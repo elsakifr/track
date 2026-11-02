@@ -1,0 +1,30 @@
+name: Spike
+description: A timeboxed investigation that answers a question
+labels: ['type:spike']
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What do we need to find out?
+    validations:
+      required: true
+  - type: input
+    id: timebox
+    attributes:
+      label: Timebox
+      placeholder: 3 days
+    validations:
+      required: true
+  - type: textarea
+    id: method
+    attributes:
+      label: Method
+      description: How will we answer it? Devices, scenarios, measurements.
+  - type: textarea
+    id: output
+    attributes:
+      label: Expected output
+      description: Usually an ADR in docs/adr/ plus a short findings summary. Spike code is throwaway and is not merged to main.
+    validations:
+      required: true

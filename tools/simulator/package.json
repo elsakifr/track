@@ -1,0 +1,22 @@
+{
+  "name": "@track/simulator",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Replays GPX tracks as simulated runners for development and load testing",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "@track/config": "workspace:*",
+    "@types/node": "^24.19.2",
+    "eslint": "^10.14.0",
+    "typescript": "~6.0.3",
+    "vitest": "^5.0.5"
+  }
+}

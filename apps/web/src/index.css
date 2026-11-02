@@ -1,0 +1,27 @@
+:root {
+  color-scheme: light dark;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  line-height: 1.5;
+}
+
+body {
+  margin: 0;
+}
+
+.placeholder {
+  display: grid;
+  place-content: center;
+  min-height: 100vh;
+  padding: 0 16px;
+  text-align: center;
+}
+
+.placeholder .meta {
+  opacity: 0.6;
+  font-size: 0.875rem;
+}

@@ -1,0 +1,25 @@
+# Label definitions for the Track repository.
+# Create them once with: scripts/setup-github-labels.sh (requires the GitHub CLI).
+- { name: 'type:feature', color: '1d76db', description: 'New capability' }
+- { name: 'type:bug', color: 'd73a4a', description: 'Something is broken' }
+- { name: 'type:chore', color: 'c5def5', description: 'Tooling, dependencies, refactoring' }
+- { name: 'type:docs', color: '0075ca', description: 'Documentation only' }
+- { name: 'type:spike', color: 'fbca04', description: 'Timeboxed investigation' }
+- { name: 'area:mobile', color: 'bfdadc', description: 'apps/mobile' }
+- { name: 'area:web', color: 'bfdadc', description: 'apps/web' }
+- {
+    name: 'area:backend',
+    color: 'bfdadc',
+    description: 'supabase/ (DB, RLS, Edge Functions, Realtime)',
+  }
+- { name: 'area:shared', color: 'bfdadc', description: 'packages/*' }
+- { name: 'area:infra', color: 'bfdadc', description: 'CI, environments, builds, tools/' }
+- { name: 'priority:P0', color: 'b60205', description: 'Blocks the current milestone' }
+- { name: 'priority:P1', color: 'fbca04', description: 'Needed for the current milestone' }
+- { name: 'priority:P2', color: '0e8a16', description: 'Nice to have' }
+- {
+    name: 'security',
+    color: 'b60205',
+    description: 'Affects privacy, authorization or data exposure',
+  }
+- { name: 'blocked', color: '000000', description: 'Waiting on something external' }

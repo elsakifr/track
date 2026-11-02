@@ -1,0 +1,4 @@
+{
+  "extends": "@track/config/tsconfig/react-vite.json",
+  "include": ["src"]
+}
