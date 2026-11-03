@@ -1,5 +1,5 @@
 # Label definitions for the Track repository.
-# Create them once with: scripts/setup-github-labels.sh (requires the GitHub CLI).
+# Create them once with: node scripts/setup-github-labels.mjs (requires the GitHub CLI).
 - { name: 'type:feature', color: '1d76db', description: 'New capability' }
 - { name: 'type:bug', color: 'd73a4a', description: 'Something is broken' }
 - { name: 'type:chore', color: 'c5def5', description: 'Tooling, dependencies, refactoring' }
@@ -23,3 +23,4 @@
     description: 'Affects privacy, authorization or data exposure',
   }
 - { name: 'blocked', color: '000000', description: 'Waiting on something external' }
+- { name: 'future', color: 'd4c5f9', description: 'Future consideration, not part of the MVP' }
