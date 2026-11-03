@@ -58,17 +58,23 @@ How two developers (and Claude Code) collaborate on Track.
 
 ## Issues and project management
 
-- **Milestones:** `M1 – Ingestion core`, `M2 – Spectator web`, `M3 – Mobile tracking`,
-  `M4 – Pilot`, `M5 – Scale readiness` (M0 is this setup).
-- **Labels** (defined in `.github/labels.yml`, created with `scripts/setup-github-labels.sh`):
+- **Milestones:** `M1 – Ingestion core & vertical slice`, `M2 – Spectator web`,
+  `M3 – Mobile tracking`, `M4 – Pilot event`, `M5 – Scale readiness` (M0 is complete). See
+  [roadmap](roadmap.md).
+- **Labels** (defined in `.github/labels.yml`, created with `node scripts/setup-github-labels.mjs`):
   - `type:` feature · bug · chore · docs · spike
   - `area:` mobile · web · backend · shared · infra
   - `priority:` P0 · P1 · P2
-  - `security`, `blocked`
+  - `security`, `blocked`, `future`
 - **Templates:** Feature (user story + acceptance criteria), Bug, Spike (question, timebox,
   expected output). Blank issues are disabled.
-- **Project board** (GitHub Projects): `Backlog → Ready → In progress → In review → Done`.
-  An issue is _Ready_ when it has acceptance criteria, labels and a milestone.
+- **Project board** ([Track](https://github.com/users/elsakifr/projects/1), GitHub Projects):
+  `Todo → In Progress → In Review → Done`.
+  - **Todo:** ready to start — the issue has acceptance criteria, labels and a milestone.
+  - **In Progress:** someone is actively working on it (a branch exists).
+  - **In Review:** a pull request is open and awaiting review.
+  - **Done:** the pull request is merged or the issue is closed.
+  - Board fields: Workstream (A / B / A+B), Size (S / M / L), Priority (P0 / P1 / P2).
 
 ## Releases and environments
 
@@ -83,6 +89,7 @@ How two developers (and Claude Code) collaborate on Track.
    `Format, lint, typecheck, test, build`, linear history (squash), and dismiss stale approvals.
 2. **Merge settings:** allow squash merge only; default commit message = PR title; auto-delete
    head branches.
-3. **Labels:** `gh auth login`, then `./scripts/setup-github-labels.sh`.
+3. **Labels:** `gh auth login`, then `node scripts/setup-github-labels.mjs`
+   (`--dry-run` validates and prints the labels without changing GitHub).
 4. **Milestones** M1–M5 and a **Project** board with the columns above.
 5. **Secrets:** none needed for CI in M0. Supabase/EAS tokens are added when deployment jobs exist.
