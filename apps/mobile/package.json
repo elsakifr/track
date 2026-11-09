@@ -6,8 +6,8 @@
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "echo \"@track/mobile: no tests yet (jest-expo is added with the first mobile logic in M1)\"",
@@ -16,6 +16,7 @@
   "dependencies": {
     "@track/shared": "workspace:*",
     "expo": "~58.0.22",
+    "expo-dev-client": "~58.0.18",
     "expo-status-bar": "~58.0.4",
     "react": "19.3.0",
     "react-native": "0.88.1"
