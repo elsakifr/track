@@ -1,7 +1,7 @@
 /**
- * @track/shared — domain types and validation schemas.
+ * @track/shared — domain types and validation schemas shared by every Track workspace.
  *
- * M1 adds the canonical position-event contract here (see docs/architecture.md §4).
- * Every GPS source and the ingest Edge Function validate against that single schema.
+ * Imports use explicit `.ts` extensions and the only dependency is Zod, so this package can be
+ * imported from Node, React Native, the browser and Deno (Supabase Edge Functions).
  */
-export const CONTRACT_VERSION = 0;
+export * from './position-event.ts';

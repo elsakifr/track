@@ -73,24 +73,38 @@ React Native, the browser and Deno.
 
 ### 4.1 Canonical position event
 
-Every source produces this shape, directly or through an adapter. Field list is the design;
-the Zod schema in `packages/shared` (M1) is the implementation and source of truth.
+Every source produces this shape, directly or through an adapter. The Zod schema in
+`packages/shared/src/position-event.ts` is the implementation and source of truth; this table is
+a summary.
 
-| Field                                    | Type               | Notes                                                                         |
-| ---------------------------------------- | ------------------ | ----------------------------------------------------------------------------- |
-| `event_id`                               | UUID               | Generated at the source. Idempotency key — retries never duplicate.           |
-| `participant_id`                         | UUID               | Resolved from the authenticated source; never trusted from the payload alone. |
-| `device_id`                              | UUID               | The registered source/device that produced the fix.                           |
-| `source_type`                            | enum               | `mobile_app`, `simulator`; later `garmin`, `tracker`, `timing_mat`, …         |
-| `recorded_at`                            | ISO-8601 timestamp | When the fix was taken (device clock).                                        |
-| `received_at`                            | timestamp          | Set by the server. `received_at − recorded_at` = ingest latency.              |
-| `lat`, `lon`                             | number (WGS84)     | Required for GPS sources.                                                     |
-| `accuracy_m`                             | number \| null     | Horizontal accuracy.                                                          |
-| `altitude_m`, `speed_mps`, `heading_deg` | number \| null     | Optional; sources fill what they have.                                        |
-| `contract_version`                       | integer            | Lets us evolve the contract without breaking old app versions.                |
+**Sent by the source** (the payload). Objects are strict: any other field — including the
+server-derived fields below — makes the event invalid, so a client can never claim an identity.
 
-Requests carry a **batch** (1–N events). Batching is what makes offline backfill and, later,
-high-throughput ingestion cheap.
+| Field                                    | Type                      | Notes                                                                                                                            |
+| ---------------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `contract_version`                       | integer, currently `1`    | Per event, because an offline queue can hold events from before and after an app update.                                         |
+| `event_id`                               | UUID v4                   | Generated at the source. A **deduplication identifier only** — never used for authentication or authorization.                   |
+| `source_type`                            | enum                      | `mobile_app`, `simulator`; later `garmin`, `tracker`, `timing_mat`, …                                                            |
+| `recorded_at`                            | ISO-8601 with timezone    | When the fix was taken (device clock). Plausibility (future, too old, race window) is checked by ingest, not by the schema.      |
+| `lat`, `lon`                             | number (WGS84)            | Required. ±90 / ±180.                                                                                                            |
+| `accuracy_m`                             | number \| null (optional) | Horizontal accuracy, ≥ 0.                                                                                                        |
+| `altitude_m`, `speed_mps`, `heading_deg` | number \| null (optional) | Sources fill what they have; loose bounds reject only broken values. "Unknown" is `null` or omitted, never a sentinel like `-1`. |
+
+**Derived by the server** (never accepted from the payload):
+
+| Field            | Source                                                                     |
+| ---------------- | -------------------------------------------------------------------------- |
+| `participant_id` | The authenticated caller (user JWT or device key).                         |
+| `device_id`      | The registered device/source that authenticated.                           |
+| `race_id`        | The participant's race.                                                    |
+| `received_at`    | The server clock on arrival. `received_at − recorded_at` = ingest latency. |
+
+Requests carry a **batch** of 1–500 events (`MAX_BATCH_SIZE`); a longer offline backlog is sent
+as several batches. Batching is what makes offline backfill and, later, high-throughput ingestion
+cheap. The server validates each event on its own, so one invalid event does not reject the
+others — but only **after** authentication, authorization and request-level checks (such as
+request size) have succeeded. If any of those fail, nothing in the request is accepted or
+stored. Deduplication on `event_id` is scoped per participant.
 
 Non-GPS sources (e.g. a timing mat reporting "bib 1234 crossed 21.1 km") are a separate event
 kind in the same contract, added when that integration is built. The pipeline stages stay the same.
