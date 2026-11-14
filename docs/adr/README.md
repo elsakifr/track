@@ -15,3 +15,7 @@ They stop the team from re-litigating settled questions and explain _why_ the co
 | [0004](0004-background-location-expo-location-first.md) | Start with expo-location; real-device spike in M1           | Accepted |
 | [0005](0005-position-data-retention.md)                 | 30-day configurable retention of raw positions              | Accepted |
 | [0006](0006-web-react-vite.md)                          | Spectator web app with React and Vite                       | Accepted |
+| [0008](0008-watch-only-tracking.md)                     | Watch-only tracking is a first-class source, built post-MVP | Proposed |
+| [0009](0009-controlled-spectator-access.md)             | Controlled spectator access to positions                    | Proposed |
+
+ADR-0007 is reserved for the outcome of the background-location spike ([#15](https://github.com/elsakifr/track/issues/15)).
