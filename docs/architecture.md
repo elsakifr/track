@@ -106,7 +106,13 @@ as several batches. Batching is what makes offline backfill and, later, high-thr
 cheap. The server validates each event on its own, so one invalid event does not reject the
 others — but only **after** authentication, authorization and request-level checks (such as
 request size) have succeeded. If any of those fail, nothing in the request is accepted or
-stored. Deduplication on `event_id` is scoped per participant.
+stored. Deduplication on `event_id` is scoped per participant. The batch may also carry
+`sent_at`: the device's clock when that upload attempt was sent. It is **diagnostic only** —
+the server logs how far it is from its own clock — and never changes how events are handled.
+Sources validate it strictly before sending, but the server ignores a malformed value (and logs
+that it was malformed) instead of rejecting the request, so diagnostic metadata can never stop a
+source's uploads.
+Requests are limited to `MAX_REQUEST_BYTES` (256 KB). The response is described in §4.5.
 
 Non-GPS sources (e.g. a timing mat reporting "bib 1234 crossed 21.1 km") are a separate event
 kind in the same contract, added when that integration is built. The pipeline stages stay the same.
@@ -117,11 +123,14 @@ kind in the same contract, added when that integration is built. The pipeline st
    `participants.user_id`. Machine sources (simulator now; trackers later): per-device API key,
    stored hashed in `devices`. The payload cannot claim a participant the caller doesn't own.
 2. **Validate** against the shared contract. Reject malformed events; accept the rest of the batch.
-3. **Deduplicate** on `event_id` (unique constraint, `on conflict do nothing`).
+3. **Deduplicate** per participant on `event_id` (unique constraint, `on conflict do nothing`).
+   Within one batch the first occurrence of an `event_id` is used; an `event_id` already stored
+   with different data is rejected as a conflict and the stored event is kept.
 4. **Normalize and store**: insert into `position_events`; upsert `latest_positions` only if the
    event is newer than what is stored (late backfilled events must not move a runner backwards).
 5. **Publish** according to the participant's visibility (§6).
-6. **Respond** with accepted `event_id`s. The client deletes only acknowledged events from its queue.
+6. **Respond** with one result per submitted event, identified by its index in the batch
+   (§4.5). The client deletes only events whose result is `accepted` or `duplicate`.
 
 ### 4.3 Adding a new source
 
@@ -151,13 +160,15 @@ watch apps — follows the same rules, so no source loses or duplicates position
 
 1. **Persist first.** Each fix is stored in a durable local queue before any upload attempt.
 2. **Batch.** Upload the oldest queued events in batches of 1–`MAX_BATCH_SIZE` (500).
-3. **Acknowledge by `event_id`.** Delete an event from the queue only when the response lists its
-   `event_id` as accepted (or as a duplicate already stored). Events that are not acknowledged
-   stay queued.
-4. **Rejected events are not retried forever.** An event the server rejects as invalid is
-   removed from the queue and counted locally, so one bad event cannot block the queue.
+3. **Act on each result.** The response has one result per submitted event, by index (§4.5).
+   An event whose result is `accepted` or `duplicate` is acknowledged and deleted from the queue.
+   A response that does not match the contract — or does not cover every submitted index — is
+   treated as a failed request: nothing is deleted.
+4. **Rejected events are not retried, and not lost.** An event whose result is `rejected` is
+   permanent: it is first saved in a local store of rejected events (with its code and reason),
+   then deleted from the queue, so one bad event cannot block the queue.
 5. **Resend safely.** A batch can be sent again after a timeout or lost response: the
-   server deduplicates per participant on `event_id`, so resends are idempotent.
+   server deduplicates per participant on `event_id`, so resent events come back as `duplicate`.
 6. **Back off.** After network or server errors, retry with exponential backoff and jitter;
    upload again immediately when connectivity returns.
 7. **Order does not matter.** Events may arrive out of order (offline backfill). The server and
@@ -166,8 +177,57 @@ watch apps — follows the same rules, so no source loses or duplicates position
    positions to fill silence.
 
 `packages/tracking-client` implements this protocol in TypeScript, and its tests are the
-reference behaviour for other implementations. The exact acknowledgement response format is
-defined with ingest (#9).
+reference behaviour for other implementations.
+
+### 4.5 Ingest response
+
+Defined in `packages/shared/src/ingest-response.ts` (the source of truth; this is a summary).
+
+**200** — every submitted event gets exactly one result, in batch order:
+
+```json
+{
+  "server_time": "2026-11-14T09:00:05.400Z",
+  "results": [
+    { "index": 0, "status": "accepted" },
+    { "index": 1, "status": "duplicate" },
+    {
+      "index": 2,
+      "status": "rejected",
+      "code": "conflict",
+      "reason": "event_id is already stored with different data"
+    }
+  ]
+}
+```
+
+- `results[i].index === i` for every `i`, and there is one result per submitted event. Results
+  are identified by **index, never by `event_id`**, so two events with the same `event_id` in one
+  batch still have unambiguous outcomes.
+- `accepted`: stored now. `duplicate`: already stored with identical data. Both are acknowledged.
+- `rejected` is permanent and carries a `code`: `invalid`, `source_mismatch`,
+  `duplicate_in_batch`, `conflict`, `future`, `outside_window` or `upload_closed`. Clients act on
+  the code; the `reason` is text for people.
+- `server_time` lets a source notice that its own clock is wrong.
+
+**Errors** — the whole request failed and nothing was stored; the body is
+`{ "error": { "code", "message" } }`:
+
+| HTTP | `code`                                    | Source behaviour                        |
+| ---- | ----------------------------------------- | --------------------------------------- |
+| 400  | `invalid_request`                         | Stop (client bug); keep all events      |
+| 401  | `unauthorized`                            | Pause until signed in again             |
+| 403  | `forbidden` (device not owned or revoked) | Pause                                   |
+| 405  | `method_not_allowed`                      | Stop; keep all events                   |
+| 413  | `payload_too_large`                       | Stop; keep all events                   |
+| 415  | `unsupported_media_type`                  | Stop; keep all events                   |
+| 429  | `rate_limited` (with `Retry-After`)       | Wait at least `Retry-After`, then retry |
+| 500  | `internal`                                | Retry with backoff                      |
+
+**Responses never contain submitted values.** Rejection reasons are the fixed texts in
+`REJECTION_REASONS`, except for `invalid`, whose reason is built with `describeValidationIssues()`
+from the contract's value-free validation issues. Error messages are value-free in the same way.
+No coordinates, timestamps, measurements or IDs from the request appear in a response.
 
 ## 5. Data model (MVP)
 

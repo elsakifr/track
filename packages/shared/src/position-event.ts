@@ -42,8 +42,19 @@ export const positionEventSchema = z.strictObject({
   heading_deg: optional(z.number().min(0).lt(360)),
 });
 
-/** A request body as sent by a source: 1 to MAX_BATCH_SIZE valid events. */
+/**
+ * The device's own clock when this upload attempt was sent (set again for every retry).
+ * Diagnostic only: the server logs how far it is from its own clock, but it never changes how
+ * events are handled, so a wrong or manipulated value cannot affect stored data.
+ */
+const sentAtSchema = z.iso.datetime({ offset: true });
+
+/**
+ * A request body as sent by a source: 1 to MAX_BATCH_SIZE valid events. Strict, including
+ * `sent_at`: sources validate what they send against this schema.
+ */
 export const positionBatchSchema = z.strictObject({
+  sent_at: sentAtSchema.optional(),
   events: z.array(positionEventSchema).min(1).max(MAX_BATCH_SIZE),
 });
 
@@ -51,23 +62,82 @@ export type SourceType = (typeof SOURCE_TYPES)[number];
 export type PositionEvent = z.infer<typeof positionEventSchema>;
 export type PositionBatch = z.infer<typeof positionBatchSchema>;
 
-/** A validation problem. Never contains input values, so positions cannot leak into logs or responses. */
+/**
+ * A validation problem. Paths contain only contract field names (or array indexes) and messages
+ * are generated from the schema's own rules, so an issue never contains submitted values or
+ * attacker-chosen field names, and cannot leak positions into logs or responses.
+ */
 export type ValidationIssue = { path: PropertyKey[]; message: string };
 export type RejectedEvent = { index: number; issues: ValidationIssue[] };
+/** A valid event together with its position in the submitted batch (responses refer to indexes). */
+export type ValidEvent = { index: number; event: PositionEvent };
 export type ParsedPositionBatch =
   | { ok: false; issues: ValidationIssue[] }
-  | { ok: true; accepted: PositionEvent[]; rejected: RejectedEvent[] };
+  | {
+      ok: true;
+      /** The valid `sent_at`, or null if it was omitted or malformed. */
+      sentAt: string | null;
+      /** True if `sent_at` was present but malformed (and therefore ignored). For diagnostics. */
+      sentAtInvalid: boolean;
+      valid: ValidEvent[];
+      rejected: RejectedEvent[];
+    };
 
+// The server parses `sent_at` leniently on purpose: it is diagnostic metadata, so a malformed
+// value must never make the server reject GPS positions (that would stop a source's uploads).
+// It is checked separately and ignored if malformed; every other field stays strict.
 const batchEnvelopeSchema = z.strictObject({
+  sent_at: z.unknown().optional(),
   events: z.array(z.unknown()).min(1).max(MAX_BATCH_SIZE),
 });
 
+/** Every field name a validation path may contain (event fields and batch envelope fields). */
+const CONTRACT_FIELDS: ReadonlySet<string> = new Set([
+  ...Object.keys(positionEventSchema.shape),
+  'sent_at',
+  'events',
+]);
+
+// Allowlist: known contract fields and array indexes only; anything else is replaced.
+const safePath = (path: readonly PropertyKey[]): PropertyKey[] =>
+  path.map((segment) =>
+    typeof segment === 'number' || (typeof segment === 'string' && CONTRACT_FIELDS.has(segment))
+      ? segment
+      : '(unknown)',
+  );
+
+// Messages are built from the issue code and the schema's own limits — never from Zod's message
+// text, which could change between versions — so they cannot contain submitted values.
+const safeMessage = (issue: z.core.$ZodIssue): string => {
+  switch (issue.code) {
+    case 'invalid_type':
+      return `expected ${issue.expected}`;
+    case 'too_big':
+      return issue.origin === 'array'
+        ? `must contain at most ${issue.maximum} items`
+        : `must be ${issue.inclusive === false ? 'less than' : 'at most'} ${issue.maximum}`;
+    case 'too_small':
+      return issue.origin === 'array'
+        ? `must contain at least ${issue.minimum} item${Number(issue.minimum) === 1 ? '' : 's'}`
+        : `must be ${issue.inclusive === false ? 'greater than' : 'at least'} ${issue.minimum}`;
+    case 'invalid_format':
+      return `invalid ${issue.format} format`;
+    case 'invalid_value':
+      return 'not an allowed value';
+    case 'unrecognized_keys':
+      return 'unknown field(s) not allowed';
+    default:
+      return 'invalid value';
+  }
+};
+
 const toIssues = (error: z.ZodError): ValidationIssue[] =>
-  error.issues.map(({ path, message }) => ({ path, message }));
+  error.issues.map((issue) => ({ path: safePath(issue.path), message: safeMessage(issue) }));
 
 /**
  * Validates a batch on the server: first the envelope, then each event on its own, so one
- * invalid event does not reject the valid ones.
+ * invalid event does not reject the valid ones. Every event keeps its index in the batch, which
+ * is how the ingest response refers to it (see ingest-response.ts).
  *
  * This is payload validation only. Authentication, authorization and request-level checks
  * (e.g. request size) must succeed BEFORE this is called, and nothing may be accepted or
@@ -77,12 +147,20 @@ export function parsePositionBatch(input: unknown): ParsedPositionBatch {
   const envelope = batchEnvelopeSchema.safeParse(input);
   if (!envelope.success) return { ok: false, issues: toIssues(envelope.error) };
 
-  const accepted: PositionEvent[] = [];
+  const rawSentAt = envelope.data.sent_at;
+  const sentAt = rawSentAt === undefined ? null : sentAtSchema.safeParse(rawSentAt);
+  const valid: ValidEvent[] = [];
   const rejected: RejectedEvent[] = [];
   envelope.data.events.forEach((event, index) => {
     const result = positionEventSchema.safeParse(event);
-    if (result.success) accepted.push(result.data);
+    if (result.success) valid.push({ index, event: result.data });
     else rejected.push({ index, issues: toIssues(result.error) });
   });
-  return { ok: true, accepted, rejected };
+  return {
+    ok: true,
+    sentAt: sentAt?.success ? sentAt.data : null,
+    sentAtInvalid: sentAt !== null && !sentAt.success,
+    valid,
+    rejected,
+  };
 }
