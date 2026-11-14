@@ -149,6 +149,12 @@ describe('positionEventSchema: privacy', () => {
 });
 
 describe('positionBatchSchema', () => {
+  it('accepts an optional sent_at with a timezone', () => {
+    expect(
+      positionBatchSchema.safeParse({ ...batchOf(1), sent_at: '2026-11-14T09:00:05Z' }).success,
+    ).toBe(true);
+  });
+
   it('accepts 1 event', () => {
     expect(positionBatchSchema.safeParse(batchOf(1)).success).toBe(true);
   });
@@ -187,15 +193,37 @@ describe('parsePositionBatch (server-side partial validation)', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.accepted.map((e) => e.event_id)).toEqual([valid1.event_id, valid2.event_id]);
+    expect(result.valid.map((v) => v.event.event_id)).toEqual([valid1.event_id, valid2.event_id]);
+    expect(result.valid.map((v) => v.index)).toEqual([0, 2]);
     expect(result.rejected.map((r) => r.index)).toEqual([1, 3]);
     expect(result.rejected[0]?.issues[0]?.path).toEqual(['lat']);
   });
 
-  it('returns accepted events exactly as validated', () => {
+  it('returns valid events exactly as validated, with their index', () => {
     const event = full();
     const result = parsePositionBatch({ events: [event] });
-    expect(result).toEqual({ ok: true, accepted: [event], rejected: [] });
+    expect(result).toEqual({
+      ok: true,
+      sentAt: null,
+      sentAtInvalid: false,
+      valid: [{ index: 0, event }],
+      rejected: [],
+    });
+  });
+
+  it('keeps both copies of a repeated event_id, each with its own index', () => {
+    // Deduplication is the server's job (first index wins); validation reports what was sent.
+    const event = minimal();
+    const result = parsePositionBatch({ events: [event, { ...event, lat: 10 }] });
+    expect(result.ok && result.valid.map((v) => v.index)).toEqual([0, 1]);
+  });
+
+  it('returns the optional sent_at, and null when it is omitted', () => {
+    const sentAt = '2026-11-14T10:00:05.120+01:00';
+    const withSentAt = parsePositionBatch({ sent_at: sentAt, events: [minimal()] });
+    expect(withSentAt.ok && withSentAt.sentAt).toBe(sentAt);
+    const without = parsePositionBatch({ events: [minimal()] });
+    expect(without.ok && without.sentAt).toBe(null);
   });
 
   it.each([
@@ -209,6 +237,101 @@ describe('parsePositionBatch (server-side partial validation)', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.issues.length).toBeGreaterThan(0);
+  });
+
+  it('never echoes the names of unknown fields', () => {
+    const result = parsePositionBatch({
+      events: [{ ...minimal(), anna_andersson_home_59_3293: true }],
+    });
+    expect(JSON.stringify(result)).not.toContain('anna_andersson_home');
+    expect(result.ok && result.rejected[0]?.issues[0]?.message).toBe(
+      'unknown field(s) not allowed',
+    );
+  });
+
+  it.each([
+    ['without a timezone', '2026-11-14T10:00:05'],
+    ['that is not a date', 'yesterday 59.3293,18.0686'],
+    ['as a number', 1763110805000],
+    ['as an object', { lat: 59.3293 }],
+    ['as null', null],
+  ])('ignores a malformed sent_at %s, without changing any event outcome', (_label, sentAt) => {
+    const events = [minimal(), { ...minimal(), lat: 91 }, full()];
+    const withBad = parsePositionBatch({ sent_at: sentAt, events });
+    const without = parsePositionBatch({ events });
+    expect(withBad.ok).toBe(true);
+    if (!withBad.ok || !without.ok) return;
+    expect(withBad.sentAt).toBe(null);
+    expect(withBad.sentAtInvalid).toBe(true);
+    expect(withBad.valid).toEqual(without.valid);
+    expect(withBad.rejected).toEqual(without.rejected);
+  });
+
+  it('reports sentAtInvalid as false for a valid or omitted sent_at', () => {
+    const valid = parsePositionBatch({ sent_at: '2026-11-14T09:00:05Z', events: [minimal()] });
+    expect(valid.ok && valid.sentAtInvalid).toBe(false);
+    const omitted = parsePositionBatch({ events: [minimal()] });
+    expect(omitted.ok && omitted.sentAtInvalid).toBe(false);
+  });
+
+  it('still rejects the whole request for any other malformed envelope field', () => {
+    expect(parsePositionBatch({ sent_at: 'bad', events: [] }).ok).toBe(false);
+    expect(parsePositionBatch({ sent_at: 'bad', ...batchOf(1), extra: 1 }).ok).toBe(false);
+  });
+
+  it.each([
+    ['a coordinate as a string', { lat: '59.3293123' }, '59.3293123'],
+    ['a coordinate out of range', { lat: 91.987654321 }, '91.987654321'],
+    ['a coordinate as an object', { lon: { secret: 18.0686123 } }, '18.0686123'],
+    ['a malformed timestamp', { recorded_at: '2026-11-09T10:15:30 home' }, 'home'],
+    ['an unknown source type', { source_type: 'garmin-of-anna' }, 'anna'],
+    ['a malformed event_id', { event_id: 'id-of-anna-andersson' }, 'anna'],
+  ])('builds messages without submitted values for %s', (_label, change, secret) => {
+    const result = parsePositionBatch({ events: [{ ...minimal(), ...change }] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const issues = result.rejected[0]?.issues ?? [];
+    expect(issues.length).toBeGreaterThan(0);
+    expect(JSON.stringify(issues)).not.toContain(secret);
+  });
+
+  it('builds paths only from contract fields', () => {
+    const allowed = new Set<PropertyKey>([
+      'contract_version',
+      'event_id',
+      'source_type',
+      'recorded_at',
+      'lat',
+      'lon',
+      'accuracy_m',
+      'altitude_m',
+      'speed_mps',
+      'heading_deg',
+      'sent_at',
+      'events',
+    ]);
+    const result = parsePositionBatch({
+      events: [{ ...minimal(), lat: 'x', home_of_anna: 1, '59.3293': 2 }],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const segments = (result.rejected[0]?.issues ?? []).flatMap((issue) => issue.path);
+    expect(segments).toContain('lat');
+    for (const segment of segments) {
+      expect(typeof segment === 'number' || segment === '(unknown)' || allowed.has(segment)).toBe(
+        true,
+      );
+    }
+    expect(JSON.stringify(result)).not.toContain('home_of_anna');
+    expect(JSON.stringify(result)).not.toContain('59.3293');
+  });
+
+  it('describes limits from the schema, not from the input', () => {
+    const result = parsePositionBatch({ events: [{ ...minimal(), lat: 91.5, heading_deg: 360 }] });
+    expect(result.ok && result.rejected[0]?.issues).toEqual([
+      { path: ['lat'], message: 'must be at most 90' },
+      { path: ['heading_deg'], message: 'must be less than 360' },
+    ]);
   });
 
   it('never includes input values in validation issues', () => {

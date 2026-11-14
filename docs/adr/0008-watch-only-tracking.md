@@ -43,11 +43,12 @@ Constraints that shape the design:
    watches M6 targets before any watch code is written.
 
 3. **The interface is the contract plus a language-neutral upload protocol.** `packages/shared`
-   stays the source of truth for the contract. The upload protocol — batching, acknowledgement by
-   `event_id`, deleting only acknowledged events, idempotent resends, retry with backoff — is
-   specified in `docs/architecture.md` §4.4. `packages/tracking-client` is the TypeScript
-   reference implementation, and its tests describe the expected behaviour; native watch apps
-   implement the same protocol. A machine-readable schema for native clients (e.g. JSON Schema
+   stays the source of truth for the contract. The upload protocol — batching, one result per
+   submitted event (by batch index), deleting only acknowledged events, idempotent resends, retry
+   with backoff — is specified in `docs/architecture.md` §4.4 and §4.5.
+   `packages/tracking-client` is the TypeScript reference implementation, and its tests
+   describe the expected behaviour; native watch apps implement the same protocol. A
+   machine-readable schema for native clients (e.g. JSON Schema
    generated from the Zod schema) is added when M6 starts.
 4. **Every source authenticates as a registered device.** A device belongs to exactly one
    participant (and so one race), has a hashed, revocable credential, and may only call ingest.
