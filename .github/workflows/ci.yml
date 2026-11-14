@@ -34,5 +34,27 @@ jobs:
 
       - run: pnpm turbo run lint typecheck test build
 
-  # M1 adds a `database` job here: `supabase start`, `supabase db reset`,
-  # `supabase test db` (pgTAP tests for RLS and Realtime authorization).
+  # Applies every migration to a fresh, isolated database and runs all pgTAP tests (schema,
+  # RLS, privileges, privacy). Database only: the tests need no other Supabase service.
+  # Uses the Supabase CLI pinned in package.json and local demo keys — no secrets.
+  database:
+    name: Database migrations and pgTAP tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Starts Postgres in Docker and applies all migrations and the seed from scratch.
+      - run: pnpm supabase db start
+
+      # Runs supabase/tests/*.sql with pg_prove; any failing test fails the job.
+      - run: pnpm supabase test db
