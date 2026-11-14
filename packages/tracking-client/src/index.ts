@@ -1,7 +1,10 @@
 /**
  * @track/tracking-client — platform-neutral offline buffer and batch uploader.
  *
- * Implemented in M1/M3 (see docs/roadmap.md). Storage is injected so the same
- * queue logic runs on React Native (SQLite) and in the Node simulator.
+ * The TypeScript reference implementation of the upload protocol (ADR-0008). Storage is
+ * injected through the `PositionQueue` interface, so the same logic runs on React Native
+ * (SQLite, M3) and in the Node simulator (in memory). The uploader follows in #17.
  */
-export {};
+export { assertBatchLimit } from './queue.ts';
+export type { PositionQueue } from './queue.ts';
+export { InMemoryPositionQueue } from './memory-queue.ts';
