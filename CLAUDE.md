@@ -36,8 +36,11 @@ pnpm supabase migration new <name>    # create a migration
 pnpm supabase test db                 # run pgTAP tests
 ```
 
-Run `pnpm check` before declaring work done. In `apps/mobile`, add Expo packages with
-`npx expo install <pkg>` (it picks SDK-compatible versions), not `pnpm add`.
+Run `pnpm check` before declaring work done. CI also applies all migrations to a fresh database
+and runs the pgTAP tests (`pnpm supabase db start`, `pnpm supabase test db`), so run
+`pnpm db:reset` and `pnpm supabase test db` locally before pushing database changes.
+In `apps/mobile`, add Expo packages with `npx expo install <pkg>` (it picks SDK-compatible
+versions), not `pnpm add`.
 
 ## Architecture rules (non-negotiable)
 
