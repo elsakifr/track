@@ -100,6 +100,22 @@ built from thin first versions of the real components, which later issues comple
 report; database and integration tests prove private positions are unreachable for spectators;
 ADR-0007 (background location) is written.
 
+**Status (2026-11-14):** physical GPS testing is paused after seven iPhone runs (interim results
+on [#4](https://github.com/elsakifr/track/issues/4)). [#4](https://github.com/elsakifr/track/issues/4),
+[#14](https://github.com/elsakifr/track/issues/14) and [#15](https://github.com/elsakifr/track/issues/15)
+stay open; development continues with automated tests, simulated GPS data and local development.
+
+**Watch-ready obligations ([ADR-0008](adr/0008-watch-only-tracking.md)):** watch-only tracking is
+built in M6, but M1 work must keep it possible:
+
+- [#9](https://github.com/elsakifr/track/issues/9) and [#19](https://github.com/elsakifr/track/issues/19):
+  ingest accepts device credentials alongside user sessions.
+- [#6](https://github.com/elsakifr/track/issues/6) and [#19](https://github.com/elsakifr/track/issues/19):
+  a participant can have several devices; each event records its device and `source_type`.
+- [#16](https://github.com/elsakifr/track/issues/16) and [#17](https://github.com/elsakifr/track/issues/17):
+  `tracking-client` implements the language-neutral upload protocol
+  ([architecture §4.4](architecture.md)) and its tests serve as the reference behaviour.
+
 ---
 
 ## [M2 — Spectator web](https://github.com/elsakifr/track/milestone/2)
@@ -174,7 +190,29 @@ Planned scope (issues will be refined after M1 and M2):
 
 ---
 
+## M6 — Watch-only tracking (after the MVP)
+
+**Goal:** a runner can use a compatible sports watch instead of a phone, and its positions reach
+spectators live ([ADR-0008](adr/0008-watch-only-tracking.md)).
+
+Planned scope (issues will be created after the feasibility spike; GitHub milestone to be created):
+
+- **Feasibility spike** (desk research, can start during M3/M4): which watches and vendors can
+  send live positions without a phone, through a Track watch app or a vendor relay, and on what
+  terms
+- Contract PR: new `source_type` value(s), versioned and backwards compatible; machine-readable
+  schema for native clients
+- Watch pairing: bind a watch to a participant with a device credential (builds on #19)
+- Watch app or vendor adapter implementing the upload protocol (architecture §4.4)
+- Field tests: locked/stationary behaviour, offline gaps and battery on the target watches
+
+**Done when:** a runner without a phone is tracked live on the spectator map from a compatible
+watch for a 60-minute run, an offline period is backfilled without loss or duplicates, and
+battery use is documented.
+
+---
+
 ## Later (not in MVP)
 
-Official timing-system adapter · Garmin / wearable integrations · dedicated GPS trackers ·
+Official timing-system adapter · other wearable integrations · dedicated GPS trackers ·
 organizer dashboard · finish-time predictions · payments.

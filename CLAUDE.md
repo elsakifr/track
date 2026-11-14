@@ -51,6 +51,8 @@ Run `pnpm check` before declaring work done. In `apps/mobile`, add Expo packages
    - Position tables are never added to the `supabase_realtime` publication.
    - Private participants are published only to `participant:{id}`, never to `race:{id}:public`.
    - Broadcast payloads contain IDs, coordinates and timestamps only — no names or user data.
+   - No client role (`anon`, `authenticated`) reads position tables directly; spectators get
+     current positions only through the controlled snapshot function (ADR-0009).
    - Any change touching these must include/update pgTAP tests and carry the `security` label.
 3. **Schema changes only via new migrations** in `supabase/migrations/`. Never edit a merged migration.
 4. **Secrets:** the `service_role` key lives only in Edge Function secrets. Never put it in
@@ -68,6 +70,11 @@ follow/live map, public/private visibility, 10–100 runners, < 10 s latency.
 
 **Not in MVP — do not build unless an issue explicitly asks:** finish-time predictions,
 organizer admin dashboard, payments, custom hardware, wearable/Garmin integrations.
+
+**Watch-only tracking is planned (M6, after the MVP) — keep it possible** (ADR-0008): ingest
+must accept device credentials, a participant can have several devices, and on-device sources
+follow the language-neutral upload protocol (architecture §4.4). Do not assume one phone per
+runner.
 
 ## Conventions
 

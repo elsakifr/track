@@ -14,6 +14,7 @@ spectators. The MVP targets running events (marathon, half-marathon).
 | Position update interval       | ~5 s per runner                                       |
 | End-to-end latency (fix → map) | < 10 s                                                |
 | Tracking with the phone locked | Required (iOS and Android)                            |
+| Watch-only tracking (no phone) | After the MVP; supported by design (ADR-0008)         |
 | Network loss                   | No data loss: buffer on device, backfill on reconnect |
 | MVP scale                      | 10–100 runners per race                               |
 | Long-term scale                | 50,000 runners per race, without client changes       |
@@ -22,8 +23,9 @@ spectators. The MVP targets running events (marathon, half-marathon).
 
 **Design principles**
 
-1. **Source-independent ingestion.** Every GPS source — phone, simulator, and later Garmin,
-   dedicated trackers, timing mats — enters through one contract and one pipeline.
+1. **Source-independent ingestion.** Every GPS source — phone, simulator, and later sports
+   watches without a phone, dedicated trackers, timing mats — enters through one contract and one
+   pipeline.
 2. **Simple first, scalable by design.** Use managed Supabase features now. Keep the seams
    (contract, ingest boundary, channel naming) that let us replace internals later.
 3. **Private by default.** Authorization is enforced by the database and Realtime policies,
@@ -40,30 +42,30 @@ spectators. The MVP targets running events (marathon, half-marathon).
 │ Simulator     │─┼────────────▶ │ Edge Function: ingest │──▶│ position_events    │ append-only
 ├───────────────┤ │ batched,     │  1 authenticate source│   ├────────────────────┤
 │ Future:       │ │ canonical    │  2 validate contract  │──▶│ latest_positions   │ 1 row/participant
-│ Garmin,       │ │ contract     │  3 dedupe (event_id)  │   └────────────────────┘
+│ watches,      │ │ contract     │  3 dedupe (event_id)  │   └────────────────────┘
 │ trackers,     │─┘              │  4 normalize + store  │
 │ timing mats   │  (via adapter) │  5 publish by policy  │──▶ Supabase Realtime (private channels)
 └───────────────┘                └───────────────────────┘     ├─ race:{id}:public      ─▶ spectators
                                                                └─ participant:{id}      ─▶ authorized
                                                                                            followers
                                                                Web app (React + MapLibre)
-                                                               1. load snapshot (RLS-protected)
+                                                               1. load snapshot (snapshot function)
                                                                2. subscribe to channel(s)
 ```
 
 ## 3. Components
 
-| Workspace                  | Responsibility                                                                                                            |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `apps/mobile`              | Runner app. Sign-in, bib claim, consent, background tracking, status. No map.                                             |
-| `apps/web`                 | Spectator app. Race page, runner search, follow, live map (MapLibre GL).                                                  |
-| `packages/shared`          | Domain types and Zod schemas, including the **canonical position-event contract**.                                        |
-| `packages/tracking-client` | Platform-neutral persistent queue + batch uploader. Storage is injected (SQLite on mobile, memory/file in the simulator). |
-| `packages/config`          | Shared TypeScript and ESLint presets.                                                                                     |
-| `supabase/migrations`      | Database schema, RLS policies, Realtime authorization policies. Source of truth for the DB.                               |
-| `supabase/functions`       | Edge Functions (Deno). `ingest` plus future per-vendor adapters; shared code in `_shared/`.                               |
-| `supabase/tests`           | pgTAP tests for RLS and Realtime authorization.                                                                           |
-| `tools/simulator`          | Replays GPX tracks as N runners through the real ingest path. Dev and load testing.                                       |
+| Workspace                  | Responsibility                                                                                                                                                                    |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/mobile`              | Runner app. Sign-in, bib claim, consent, background tracking, status. No map.                                                                                                     |
+| `apps/web`                 | Spectator app. Race page, runner search, follow, live map (MapLibre GL).                                                                                                          |
+| `packages/shared`          | Domain types and Zod schemas, including the **canonical position-event contract**.                                                                                                |
+| `packages/tracking-client` | Platform-neutral persistent queue + batch uploader. Storage is injected (SQLite on mobile, memory/file in the simulator). Reference implementation of the upload protocol (§4.4). |
+| `packages/config`          | Shared TypeScript and ESLint presets.                                                                                                                                             |
+| `supabase/migrations`      | Database schema, RLS policies, Realtime authorization policies. Source of truth for the DB.                                                                                       |
+| `supabase/functions`       | Edge Functions (Deno). `ingest` plus future per-vendor adapters; shared code in `_shared/`.                                                                                       |
+| `supabase/tests`           | pgTAP tests for RLS and Realtime authorization.                                                                                                                                   |
+| `tools/simulator`          | Replays GPX tracks as N runners through the real ingest path. Dev and load testing.                                                                                               |
 
 **Dependency rule:** apps depend on packages; packages never depend on apps; nothing depends on
 `tools/`. `packages/shared` has no dependencies other than Zod so it can be imported by Node,
@@ -129,13 +131,43 @@ A new source never changes the pipeline, the database schema for positions, or t
   `ingest-<vendor>` that verifies the vendor's signature, maps the payload to canonical events and
   calls the shared pipeline in `supabase/functions/_shared/`.
 - **Pull sources** (vendor APIs we poll): a scheduled job that does the same mapping.
-- **On-device sources** (watch via phone): feed the same `tracking-client` queue.
+- **Watch-only sources** (after the MVP, [ADR-0008](adr/0008-watch-only-tracking.md)): either a
+  Track app on the watch posts canonical batches to `/ingest` over the watch's own connection,
+  authenticated with a device credential, or a vendor's cloud relays the data to an
+  `ingest-<vendor>` adapter. Watch apps are native code: they implement the upload protocol
+  (§4.4), not `packages/tracking-client`.
 
-Each source gets a `source_type` value and registers its devices in `devices`.
+Each source gets a `source_type` value and registers its devices in `devices`. A participant can
+have several devices (e.g. phone and watch); every source authenticates as one of them.
 
 _Validate in M1:_ importing `packages/shared` from Deno Edge Functions. Plan: the package uses
 explicit `.ts` import extensions and only depends on Zod, so Deno can import it by relative path
 with an import map for `zod`.
+
+### 4.4 Upload protocol (language-neutral)
+
+Every on-device source — the phone app through `packages/tracking-client`, and later native
+watch apps — follows the same rules, so no source loses or duplicates positions:
+
+1. **Persist first.** Each fix is stored in a durable local queue before any upload attempt.
+2. **Batch.** Upload the oldest queued events in batches of 1–`MAX_BATCH_SIZE` (500).
+3. **Acknowledge by `event_id`.** Delete an event from the queue only when the response lists its
+   `event_id` as accepted (or as a duplicate already stored). Events that are not acknowledged
+   stay queued.
+4. **Rejected events are not retried forever.** An event the server rejects as invalid is
+   removed from the queue and counted locally, so one bad event cannot block the queue.
+5. **Resend safely.** A batch can be sent again after a timeout or lost response: the
+   server deduplicates per participant on `event_id`, so resends are idempotent.
+6. **Back off.** After network or server errors, retry with exponential backoff and jitter;
+   upload again immediately when connectivity returns.
+7. **Order does not matter.** Events may arrive out of order (offline backfill). The server and
+   spectators order by `recorded_at`.
+8. **No heartbeats.** A stationary device may produce no fixes for minutes; sources do not invent
+   positions to fill silence.
+
+`packages/tracking-client` implements this protocol in TypeScript, and its tests are the
+reference behaviour for other implementations. The exact acknowledgement response format is
+defined with ingest (#9).
 
 ## 5. Data model (MVP)
 
@@ -153,9 +185,14 @@ organizations ─┐
 - **races**: name, start/end time, timezone, `is_published`, `retention_days` (default 30).
 - **participants**: `race_id`, `bib`, `display_name`, `user_id` (nullable until claimed),
   `visibility` (`public` | `private`, **default `private`**), consent timestamp.
-- **position_events**: columns from §4.1 plus `race_id`. Indexed by `(participant_id, recorded_at)`.
-  Designed so it can be partitioned by race/time later without changing writers.
-- **latest_positions**: one row per participant, also stores `distance_along_course_m`
+- **devices**: a registered source (phone app, watch, simulator, vendor relay) belonging to one
+  participant; `source_type`, hashed credential, revocable. A participant can have several
+  devices (ADR-0008).
+- **position_events**: columns from §4.1 plus `race_id`, and the device and `source_type` that
+  produced each event. Indexed by `(participant_id, recorded_at)`. Designed so it can be
+  partitioned by race/time later without changing writers.
+- **latest_positions**: one row per participant — the fix with the most recent `recorded_at`,
+  from whichever device sent it. Also stores `distance_along_course_m`
   (PostGIS `ST_LineLocatePoint`) so spectators see "23.4 km".
 - **participant_followers**: grants a user access to a private participant (§6.3).
 
@@ -170,22 +207,23 @@ channel._
 
 ### 6.1 Threats we design against
 
-| Threat                                                                  | Control                                                                                                                                                                   |
-| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Spectator subscribes to a guessed channel topic to see a private runner | All channels are **private** (Realtime Authorization); topic access is decided by RLS, not by obscurity.                                                                  |
-| Spectator listens to DB changes on position tables                      | Position tables are **not** in the `supabase_realtime` publication. No `postgres_changes` on location data, ever.                                                         |
-| Client forges broadcasts (fake positions) on a race channel             | No `INSERT` policy on `realtime.messages` for `anon`/`authenticated`: clients can receive, never send. Only the server publishes.                                         |
-| Private runner leaks through the public race channel                    | `ingest` publishes private participants **only** to `participant:{id}`; the public race payload is built from public participants only.                                   |
-| Direct table/API read of positions                                      | RLS on every table. `anon` can read `latest_positions` only for public participants in published races. `position_events` (history) is never directly readable by `anon`. |
-| Payload over-sharing                                                    | Broadcast payloads carry IDs, coordinates and timestamps only — no names, emails or user IDs. Names come from RLS-protected tables.                                       |
-| Leaked service key                                                      | `service_role` key lives only in Edge Function secrets. Never in `VITE_*` / `EXPO_PUBLIC_*` variables or the repo.                                                        |
-| Forged positions for someone else                                       | `ingest` derives the participant from the authenticated caller, not from the payload.                                                                                     |
+| Threat                                                                  | Control                                                                                                                                                                                                                                                                  |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Spectator subscribes to a guessed channel topic to see a private runner | All channels are **private** (Realtime Authorization); topic access is decided by RLS, not by obscurity.                                                                                                                                                                 |
+| Spectator listens to DB changes on position tables                      | Position tables are **not** in the `supabase_realtime` publication. No `postgres_changes` on location data, ever.                                                                                                                                                        |
+| Client forges broadcasts (fake positions) on a race channel             | No `INSERT` policy on `realtime.messages` for `anon`/`authenticated`: clients can receive, never send. Only the server publishes.                                                                                                                                        |
+| Private runner leaks through the public race channel                    | `ingest` publishes private participants **only** to `participant:{id}`; the public race payload is built from public participants only.                                                                                                                                  |
+| Direct table/API read of positions                                      | RLS on every table. **No client role can read position tables at all.** Spectators get current positions only through the snapshot function, which applies visibility, follower grants and the race's live window ([ADR-0009](adr/0009-controlled-spectator-access.md)). |
+| Bulk scraping with the public anon key                                  | Snapshots and channels require a spectator session (anonymous sign-in) and only work while the race is published and live; payloads use a fixed column allow-list.                                                                                                       |
+| Payload over-sharing                                                    | Broadcast payloads carry IDs, coordinates and timestamps only — no names, emails or user IDs. Names come from RLS-protected tables.                                                                                                                                      |
+| Leaked service key                                                      | `service_role` key lives only in Edge Function secrets. Never in `VITE_*` / `EXPO_PUBLIC_*` variables or the repo.                                                                                                                                                       |
+| Forged positions for someone else                                       | `ingest` derives the participant from the authenticated caller, not from the payload.                                                                                                                                                                                    |
 
 ### 6.2 Realtime channels
 
 | Topic                          | Who can subscribe (RLS on `realtime.messages`, `SELECT`)                            | Content                               |
 | ------------------------------ | ----------------------------------------------------------------------------------- | ------------------------------------- |
-| `race:{race_id}:public`        | Anyone, if the race is published                                                    | Positions of public participants only |
+| `race:{race_id}:public`        | Spectator sessions, while the race is published and inside its live window          | Positions of public participants only |
 | `participant:{participant_id}` | The participant themself, or a user in `participant_followers` for that participant | That participant's positions          |
 
 - Clients join with `{ config: { private: true } }`. Policies check `realtime.topic()` against
@@ -196,10 +234,15 @@ channel._
   with at most a few seconds of caching). Positions already broadcast while public cannot be
   recalled; the app explains this when a runner switches to private.
 
-_Validate in M1:_ subscribing to private channels as an unauthenticated spectator. If policies
-for the `anon` role are not applied as expected, spectators will use **Supabase anonymous
-sign-in** (no user interaction) and policies will target `authenticated`. Either way, the
-invariant above is enforced by automated tests (§6.4).
+Spectators use **Supabase anonymous sign-in** (no user interaction), so channel policies and
+the snapshot function target `authenticated` sessions ([ADR-0009](adr/0009-controlled-spectator-access.md)).
+_Validate in M1 (#5):_ that anonymous sessions can be authorized on private channels as intended.
+Either way, the invariant above is enforced by automated tests (§6.4).
+
+**Snapshot:** current positions are read only through `get_race_snapshot(race_id)`, a
+`SECURITY DEFINER` function that returns public participants plus private participants the caller
+follows, only while the race is published and live, with a fixed column allow-list (no names, no
+history).
 
 ### 6.3 Following a private runner
 
@@ -211,8 +254,9 @@ user. The runner can list and revoke followers. Scheduled for M2/M3.
 
 Security is tested, not assumed:
 
-- **pgTAP tests** (`supabase/tests/`, run in CI from M1) assert, for each role, which rows of
-  `latest_positions`/`position_events` are visible and which topics can be subscribed to.
+- **pgTAP tests** (`supabase/tests/`, run in CI from M1) assert, for each role, that position
+  tables are not readable directly, what the snapshot function returns (and never returns), and
+  which topics can be subscribed to.
 - An **integration test** runs a real Realtime client as an anonymous spectator and asserts it
   cannot join `participant:{private_id}` and never receives a private participant on the race channel.
 - Every PR checklist includes the invariant. Issues touching it get the `security` label.
@@ -229,7 +273,8 @@ Security is tested, not assumed:
 
 ## 7. Real-time delivery and latency
 
-**Spectator flow:** load race metadata + `latest_positions` snapshot (RLS-protected REST) →
+**Spectator flow:** start an anonymous session → load race metadata + the snapshot through
+`get_race_snapshot` →
 subscribe to `race:{id}:public` and any authorized `participant:{id}` channels → apply updates.
 On reconnect, refetch the snapshot.
 
@@ -262,6 +307,14 @@ reports end-to-end fix-to-broadcast latency.
 - **Fallback:** if the M1 spike shows `expo-location` is not reliable enough on locked phones,
   we evaluate `react-native-background-geolocation` (paid for Android release builds). Because the
   queue/uploader is library-independent, only the location adapter changes.
+- **Stationary silence:** the iPhone spike (#4, interim results) showed that iOS stops delivering
+  fixes while the device is stationary and resumes within about a second of movement. The app
+  cannot send heartbeats during that silence, so spectators see "last seen" rather than an error.
+
+**Sources without a phone (after the MVP).** Watch-only tracking follows
+[ADR-0008](adr/0008-watch-only-tracking.md): the watch (or its vendor's cloud) is a device of its
+own that sends canonical batches through ingest and follows the upload protocol (§4.4). The phone
+app and the watch are two devices of the same participant.
 
 ## 9. Environments and cost
 
@@ -297,10 +350,12 @@ results (M5), without client changes:
 
 ## 11. Risks and open questions
 
-| Risk / question                                                     | Mitigation / when resolved                                     |
-| ------------------------------------------------------------------- | -------------------------------------------------------------- |
-| Background tracking unreliable on locked phones (esp. Android OEMs) | Real-device spike in M1, ADR-0004 fallback                     |
-| Private-channel behavior for unauthenticated spectators             | Validate in M1; anonymous sign-in fallback (§6.2)              |
-| Sharing `packages/shared` with Deno Edge Functions                  | Validate in M1 (§4.3)                                          |
-| Supabase free-tier quotas during the pilot                          | Measure in M4; upgrade before public events                    |
-| Default visibility (`private`) vs organizer expectations            | Revisit with first organizer; default stays privacy-preserving |
+| Risk / question                                                          | Mitigation / when resolved                                       |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| Background tracking unreliable on locked phones (esp. Android OEMs)      | Real-device spike in M1, ADR-0004 fallback                       |
+| Private-channel behavior for unauthenticated spectators                  | Validate in M1; anonymous sign-in fallback (§6.2)                |
+| Sharing `packages/shared` with Deno Edge Functions                       | Validate in M1 (§4.3)                                            |
+| Supabase free-tier quotas during the pilot                               | Measure in M4; upgrade before public events                      |
+| Default visibility (`private`) vs organizer expectations                 | Revisit with first organizer; default stays privacy-preserving   |
+| Which watches can send live positions without a phone, and on what terms | Feasibility spike before M6 (ADR-0008)                           |
+| Stationary devices go silent; silence looks like a failure               | "Last seen" in the spectator UI; no heartbeat requirement (§4.4) |
